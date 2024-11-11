@@ -1,9 +1,15 @@
 import streamlit as st
 import json
+from PIL import Image
+import os
 
 class HomeInventoryApp:
     def __init__(self):
         st.title("Home Inventory Organizer")
+
+        # Create images directory if it doesn't exist
+        if not os.path.exists('item_images'):
+            os.makedirs('item_images')
 
         # Initialize session state if not exists
         if 'inventory' not in st.session_state:
@@ -54,8 +60,9 @@ class HomeInventoryApp:
 
             st.subheader("Item Management")
             item_name = st.text_input("Item Name")
+            uploaded_file = st.file_uploader("Upload Item Image", type=['png', 'jpg', 'jpeg'])
             if st.button("Add Item"):
-                self.add_item(item_name)
+                self.add_item(item_name, uploaded_file)
 
         with right_col:
             st.subheader("Inventory List")
@@ -66,15 +73,41 @@ class HomeInventoryApp:
             data = []
             for area in st.session_state.inventory:
                 for storage in st.session_state.inventory[area]:
-                    for item in st.session_state.inventory[area][storage]:
-                        data.append({"Area": area, "Storage": storage, "Item": item})
+                    for item_data in st.session_state.inventory[area][storage]:
+                        if isinstance(item_data, dict):
+                            item_name = item_data['name']
+                            image_path = item_data.get('image', '')
+                            if image_path and os.path.exists(image_path):
+                                image = Image.open(image_path)
+                                data.append({
+                                    "Area": area,
+                                    "Storage": storage,
+                                    "Item": item_name,
+                                    "Image": image
+                                })
+                            else:
+                                data.append({
+                                    "Area": area,
+                                    "Storage": storage,
+                                    "Item": item_name,
+                                    "Image": None
+                                })
+                        else:
+                            # Handle legacy data
+                            data.append({
+                                "Area": area,
+                                "Storage": storage,
+                                "Item": item_data,
+                                "Image": None
+                            })
             
             if data:
                 st.data_editor(data, key='inventory_table', 
                              column_config={
                                  "Area": st.column_config.TextColumn("Area"),
                                  "Storage": st.column_config.TextColumn("Storage"),
-                                 "Item": st.column_config.TextColumn("Item")
+                                 "Item": st.column_config.TextColumn("Item"),
+                                 "Image": st.column_config.ImageColumn("Image", help="Item image")
                              },
                              hide_index=True)
 
@@ -92,7 +125,15 @@ class HomeInventoryApp:
 
     def delete_area(self):
         if st.session_state.area_select:
-            del st.session_state.inventory[st.session_state.area_select]
+            # Delete associated images first
+            area = st.session_state.area_select
+            for storage in st.session_state.inventory[area].values():
+                for item in storage:
+                    if isinstance(item, dict) and 'image' in item:
+                        if os.path.exists(item['image']):
+                            os.remove(item['image'])
+            
+            del st.session_state.inventory[area]
             self.save_inventory()
             st.success("Area deleted successfully")
             st.rerun()
@@ -114,12 +155,19 @@ class HomeInventoryApp:
 
     def delete_storage(self):
         if st.session_state.area_select and st.session_state.storage_select:
+            # Delete associated images first
+            storage = st.session_state.inventory[st.session_state.area_select][st.session_state.storage_select]
+            for item in storage:
+                if isinstance(item, dict) and 'image' in item:
+                    if os.path.exists(item['image']):
+                        os.remove(item['image'])
+            
             del st.session_state.inventory[st.session_state.area_select][st.session_state.storage_select]
             self.save_inventory()
             st.success("Storage location deleted successfully")
             st.rerun()
 
-    def add_item(self, item):
+    def add_item(self, item, uploaded_file):
         if not all([st.session_state.area_select, st.session_state.storage_select, item]):
             st.error("Please fill in all fields")
             return
@@ -134,7 +182,16 @@ class HomeInventoryApp:
             st.error("Please select a valid storage location")
             return
         
-        st.session_state.inventory[area][storage].append(item)
+        item_data = {'name': item}
+        
+        if uploaded_file:
+            # Save the uploaded image
+            image_path = os.path.join('item_images', f"{area}_{storage}_{item}_{uploaded_file.name}")
+            with open(image_path, "wb") as f:
+                f.write(uploaded_file.getvalue())
+            item_data['image'] = image_path
+        
+        st.session_state.inventory[area][storage].append(item_data)
         self.save_inventory()
         st.success(f"Item '{item}' added successfully")
         st.rerun()
@@ -145,9 +202,20 @@ class HomeInventoryApp:
             for row in selected_rows:
                 area = row['Area']
                 storage = row['Storage']
-                item = row['Item']
+                item_name = row['Item']
                 
-                st.session_state.inventory[area][storage].remove(item)
+                # Find and remove the item
+                storage_list = st.session_state.inventory[area][storage]
+                for item in storage_list:
+                    if isinstance(item, dict) and item['name'] == item_name:
+                        if 'image' in item and os.path.exists(item['image']):
+                            os.remove(item['image'])
+                        storage_list.remove(item)
+                        break
+                    elif item == item_name:  # Legacy data
+                        storage_list.remove(item)
+                        break
+                
                 if not st.session_state.inventory[area][storage]:
                     del st.session_state.inventory[area][storage]
                 if not st.session_state.inventory[area]:
