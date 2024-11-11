@@ -1,198 +1,165 @@
-import tkinter as tk
-from tkinter import ttk
+import streamlit as st
 import json
-from tkinter import messagebox
 
 class HomeInventoryApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Home Inventory Organizer")
-        self.root.geometry("800x600")
+    def __init__(self):
+        st.title("Home Inventory Organizer")
 
-        # Data structure to store items
-        self.inventory = {}
-        
-        # Load existing data if available
-        try:
-            with open('home_inventory.json', 'r') as file:
-                self.inventory = json.load(file)
-        except FileNotFoundError:
-            self.inventory = {}
+        # Initialize session state if not exists
+        if 'inventory' not in st.session_state:
+            # Load existing data if available
+            try:
+                with open('home_inventory.json', 'r') as file:
+                    st.session_state.inventory = json.load(file)
+            except FileNotFoundError:
+                st.session_state.inventory = {}
 
-        # Create main frames
-        self.left_frame = ttk.Frame(root, padding="10")
-        self.left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        self.right_frame = ttk.Frame(root, padding="10")
-        self.right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        # Create two columns for layout
+        left_col, right_col = st.columns(2)
 
-        # Area management
-        ttk.Label(self.left_frame, text="Area Management").pack(pady=5)
-        self.area_entry = ttk.Entry(self.left_frame)
-        self.area_entry.pack(pady=5)
-        ttk.Button(self.left_frame, text="Add Area", command=self.add_area).pack()
-        ttk.Button(self.left_frame, text="Delete Area", command=self.delete_area).pack()
+        with left_col:
+            st.subheader("Area Management")
+            area_name = st.text_input("Area Name")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Add Area"):
+                    self.add_area(area_name)
+            with col2:
+                if st.button("Delete Area"):
+                    self.delete_area()
 
-        # Area selection
-        ttk.Label(self.left_frame, text="Select Area:").pack(pady=5)
-        self.area_var = tk.StringVar()
-        self.area_combo = ttk.Combobox(self.left_frame, textvariable=self.area_var)
-        self.area_combo.pack(pady=5)
-        self.area_combo.bind('<<ComboboxSelected>>', self.update_storage_locations)
+            st.subheader("Select Area")
+            selected_area = st.selectbox("Choose Area", 
+                                       options=list(st.session_state.inventory.keys()),
+                                       key='area_select')
 
-        # Storage location management
-        ttk.Label(self.left_frame, text="Storage Location Management").pack(pady=5)
-        self.storage_entry = ttk.Entry(self.left_frame)
-        self.storage_entry.pack(pady=5)
-        ttk.Button(self.left_frame, text="Add Storage", command=self.add_storage).pack()
-        ttk.Button(self.left_frame, text="Delete Storage", command=self.delete_storage).pack()
+            st.subheader("Storage Location Management")
+            storage_name = st.text_input("Storage Location Name")
+            col3, col4 = st.columns(2)
+            with col3:
+                if st.button("Add Storage"):
+                    self.add_storage(storage_name)
+            with col4:
+                if st.button("Delete Storage"):
+                    self.delete_storage()
 
-        # Storage location selection
-        ttk.Label(self.left_frame, text="Select Storage Location:").pack(pady=5)
-        self.storage_var = tk.StringVar()
-        self.storage_combo = ttk.Combobox(self.left_frame, textvariable=self.storage_var)
-        self.storage_combo.pack(pady=5)
+            storage_options = []
+            if selected_area and selected_area in st.session_state.inventory:
+                storage_options = list(st.session_state.inventory[selected_area].keys())
+            
+            st.subheader("Select Storage Location")
+            selected_storage = st.selectbox("Choose Storage Location",
+                                          options=storage_options,
+                                          key='storage_select')
 
-        # Item entry
-        ttk.Label(self.left_frame, text="Item Name:").pack(pady=5)
-        self.item_entry = ttk.Entry(self.left_frame)
-        self.item_entry.pack(pady=5)
+            st.subheader("Item Management")
+            item_name = st.text_input("Item Name")
+            if st.button("Add Item"):
+                self.add_item(item_name)
 
-        # Add item button
-        ttk.Button(self.left_frame, text="Add Item", command=self.add_item).pack(pady=10)
+        with right_col:
+            st.subheader("Inventory List")
+            if st.button("Delete Selected"):
+                self.delete_item()
+            
+            # Display inventory as a table
+            data = []
+            for area in st.session_state.inventory:
+                for storage in st.session_state.inventory[area]:
+                    for item in st.session_state.inventory[area][storage]:
+                        data.append({"Area": area, "Storage": storage, "Item": item})
+            
+            if data:
+                st.data_editor(data, key='inventory_table', 
+                             column_config={
+                                 "Area": st.column_config.TextColumn("Area"),
+                                 "Storage": st.column_config.TextColumn("Storage"),
+                                 "Item": st.column_config.TextColumn("Item")
+                             },
+                             hide_index=True)
 
-        # Display area
-        self.tree = ttk.Treeview(self.right_frame, columns=('Area', 'Storage', 'Item'), show='headings')
-        self.tree.heading('Area', text='Area')
-        self.tree.heading('Storage', text='Storage')
-        self.tree.heading('Item', text='Item')
-        self.tree.pack(fill=tk.BOTH, expand=True)
-
-        # Delete button
-        ttk.Button(self.right_frame, text="Delete Selected", command=self.delete_item).pack(pady=5)
-
-        # Update area combobox
-        self.update_area_combobox()
-        
-        # Load existing items into tree
-        self.refresh_tree()
-
-    def update_area_combobox(self):
-        self.area_combo['values'] = tuple(self.inventory.keys())
-
-    def update_storage_locations(self, event=None):
-        area = self.area_var.get()
-        if area in self.inventory:
-            self.storage_combo['values'] = tuple(self.inventory[area].keys())
-        else:
-            self.storage_combo['values'] = ()
-        self.storage_combo.set('')
-
-    def add_area(self):
-        area = self.area_entry.get().strip()
+    def add_area(self, area):
         if not area:
-            messagebox.showerror("Error", "Please enter an area name")
+            st.error("Please enter an area name")
             return
-        if area not in self.inventory:
-            self.inventory[area] = {}
+        if area not in st.session_state.inventory:
+            st.session_state.inventory[area] = {}
             self.save_inventory()
-            self.update_area_combobox()
-            self.area_entry.delete(0, tk.END)
+            st.success(f"Area '{area}' added successfully")
+            st.rerun()
         else:
-            messagebox.showerror("Error", "Area already exists")
+            st.error("Area already exists")
 
     def delete_area(self):
-        area = self.area_var.get()
-        if area in self.inventory:
-            del self.inventory[area]
+        if st.session_state.area_select:
+            del st.session_state.inventory[st.session_state.area_select]
             self.save_inventory()
-            self.update_area_combobox()
-            self.refresh_tree()
-            self.area_var.set('')
-            self.storage_var.set('')
-            self.update_storage_locations()
+            st.success("Area deleted successfully")
+            st.rerun()
 
-    def add_storage(self):
-        area = self.area_var.get()
-        storage = self.storage_entry.get().strip()
-        if not area:
-            messagebox.showerror("Error", "Please select an area first")
+    def add_storage(self, storage):
+        if not st.session_state.area_select:
+            st.error("Please select an area first")
             return
         if not storage:
-            messagebox.showerror("Error", "Please enter a storage location name")
+            st.error("Please enter a storage location name")
             return
-        if storage not in self.inventory[area]:
-            self.inventory[area][storage] = []
+        if storage not in st.session_state.inventory[st.session_state.area_select]:
+            st.session_state.inventory[st.session_state.area_select][storage] = []
             self.save_inventory()
-            self.update_storage_locations()
-            self.storage_entry.delete(0, tk.END)
+            st.success(f"Storage '{storage}' added successfully")
+            st.rerun()
         else:
-            messagebox.showerror("Error", "Storage location already exists in this area")
+            st.error("Storage location already exists in this area")
 
     def delete_storage(self):
-        area = self.area_var.get()
-        storage = self.storage_var.get()
-        if area in self.inventory and storage in self.inventory[area]:
-            del self.inventory[area][storage]
+        if st.session_state.area_select and st.session_state.storage_select:
+            del st.session_state.inventory[st.session_state.area_select][st.session_state.storage_select]
             self.save_inventory()
-            self.update_storage_locations()
-            self.refresh_tree()
-            self.storage_var.set('')
+            st.success("Storage location deleted successfully")
+            st.rerun()
 
-    def add_item(self):
-        area = self.area_var.get()
-        storage = self.storage_var.get()
-        item = self.item_entry.get()
-
-        if not all([area, storage, item]):
-            messagebox.showerror("Error", "Please fill in all fields")
+    def add_item(self, item):
+        if not all([st.session_state.area_select, st.session_state.storage_select, item]):
+            st.error("Please fill in all fields")
             return
 
-        if area not in self.inventory:
-            messagebox.showerror("Error", "Please select a valid area")
+        area = st.session_state.area_select
+        storage = st.session_state.storage_select
+        
+        if area not in st.session_state.inventory:
+            st.error("Please select a valid area")
             return
-        if storage not in self.inventory[area]:
-            messagebox.showerror("Error", "Please select a valid storage location")
+        if storage not in st.session_state.inventory[area]:
+            st.error("Please select a valid storage location")
             return
         
-        self.inventory[area][storage].append(item)
+        st.session_state.inventory[area][storage].append(item)
         self.save_inventory()
-        self.refresh_tree()
-        self.item_entry.delete(0, tk.END)
+        st.success(f"Item '{item}' added successfully")
+        st.rerun()
 
     def delete_item(self):
-        selected_item = self.tree.selection()
-        if not selected_item:
-            return
-        
-        item = self.tree.item(selected_item)['values']
-        area, storage, item_name = item
-        
-        self.inventory[area][storage].remove(item_name)
-        if not self.inventory[area][storage]:
-            del self.inventory[area][storage]
-        if not self.inventory[area]:
-            del self.inventory[area]
-            self.update_area_combobox()
-            self.update_storage_locations()
+        if 'inventory_table' in st.session_state and st.session_state.inventory_table:
+            selected_rows = st.session_state.inventory_table
+            for row in selected_rows:
+                area = row['Area']
+                storage = row['Storage']
+                item = row['Item']
+                
+                st.session_state.inventory[area][storage].remove(item)
+                if not st.session_state.inventory[area][storage]:
+                    del st.session_state.inventory[area][storage]
+                if not st.session_state.inventory[area]:
+                    del st.session_state.inventory[area]
             
-        self.save_inventory()
-        self.refresh_tree()
-
-    def refresh_tree(self):
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-            
-        for area in self.inventory:
-            for storage in self.inventory[area]:
-                for item in self.inventory[area][storage]:
-                    self.tree.insert('', tk.END, values=(area, storage, item))
+            self.save_inventory()
+            st.success("Selected items deleted successfully")
+            st.rerun()
 
     def save_inventory(self):
         with open('home_inventory.json', 'w') as file:
-            json.dump(self.inventory, file)
+            json.dump(st.session_state.inventory, file)
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = HomeInventoryApp(root)
-    root.mainloop()
+    app = HomeInventoryApp()
